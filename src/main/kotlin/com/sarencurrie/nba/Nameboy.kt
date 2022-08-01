@@ -1,11 +1,14 @@
 package com.sarencurrie.nba
 
 import net.dv8tion.jda.api.JDABuilder
+import net.dv8tion.jda.api.entities.Guild
+import net.dv8tion.jda.api.entities.Member
 import net.dv8tion.jda.api.entities.Message
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.requests.GatewayIntent
 import net.dv8tion.jda.api.utils.cache.CacheFlag
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 fun main() {
@@ -22,12 +25,12 @@ fun main() {
             CacheFlag.MEMBER_OVERRIDES,
             CacheFlag.VOICE_STATE
         )
-        .addEventListeners(CommandListener())
+        .addEventListeners(CommandListener(Sqlite()))
         .build()
     client.awaitReady()
 }
 
-class CommandListener : ListenerAdapter() {
+class CommandListener(val sqlite: Sqlite) : ListenerAdapter() {
     override fun onMessageReceived(event: MessageReceivedEvent) {
         val messageParts = event.message.contentRaw.split(" ", limit = 4)
         if (!messageParts[0].matches(Regex("<@!?${event.jda.selfUser.id}>"))) {
@@ -57,7 +60,8 @@ class CommandListener : ListenerAdapter() {
             try {
                 rename(args[2], args[3], event)
             } catch (e: Exception) {
-                event.channel.sendMessage("Error: ${e.message}").complete()
+                e.printStackTrace()
+                event.channel.sendMessage("**Error:** ${e.message}").complete()
                 return
             }
             event.channel
@@ -66,17 +70,49 @@ class CommandListener : ListenerAdapter() {
                 .flatMap(Message::delete)
                 .complete()
             return
+        },
+        "history" to fun(args, event) {
+            try {
+                val server = event.guild
+                val member = mentionToMember(args[2], server)
+                val renameLog = sqlite.getRenameHistory(server.id, member.id)
+                if (renameLog.isEmpty()) {
+                    event.channel.sendMessage("I don't remember renaming them in this server.").complete()
+                    return
+                }
+                val b = StringBuilder()
+                b.append("**Rename history for ${member.effectiveName}:**\n")
+                b.append("Renamer | Renamed to | Link\n")
+                renameLog.forEach {
+                    b.append(idToCurrentName(it.first, server) ?: "Unknown \uD83E\uDEE5")
+                        .append(" | ")
+                        .append(it.second)
+                        .append(" | ")
+                        .append(it.third)
+                        .append("\n")
+                }
+                event.channel.sendMessage(b.toString()).complete()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                event.channel.sendMessage("**Error:** ${e.message}").complete()
+                return
+            }
         }
     )
 
     private fun rename(user: String, name: String, event: MessageReceivedEvent) {
         val server = event.guild
-        val vals = Regex("<@!?(\\d+)>").find(user)?.groupValues
-        val member = Regex("<@!?(\\d+)>").find(user)?.groupValues?.get(1)?.let { server.getMemberById(it) }
-            ?: throw RuntimeException("Cannot find $user")
+        val member = mentionToMember(user, server)
         server
             .modifyNickname(member, name)
             .reason("On behalf of ${event.author.asTag}")
             .complete()
+        sqlite.save(RenameLog(member.id, event.author.id, name, server.id, Instant.now(), event.message.jumpUrl))
     }
 }
+
+private fun mentionToMember(user: String, server: Guild): Member =
+    Regex("<@!?(\\d+)>").find(user)?.groupValues?.get(1)?.let { server.getMemberById(it) }
+        ?: throw RuntimeException("Cannot find $user")
+
+private fun idToCurrentName(id: String, server: Guild): String? = server.getMemberById(id)?.effectiveName
