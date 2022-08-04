@@ -29,7 +29,7 @@ class Sqlite : AutoCloseable {
 
     fun getRenameHistory(guildId: String, userId: String): List<Triple<String, String, String>> {
         val statement =
-            connection.prepareStatement("SELECT renamerId, renamedTo, messageLink FROM RenameEvents WHERE guildId = ? AND renamedId = ? ORDER BY date DESC")
+            connection.prepareStatement("SELECT renamerId, renamedTo, messageLink FROM RenameEvents WHERE guildId = ? AND renamedId = ? ORDER BY date ASC")
         statement.setString(1, guildId)
         statement.setString(2, userId)
         val result = statement.executeQuery()
